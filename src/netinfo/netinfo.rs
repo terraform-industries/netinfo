@@ -166,6 +166,7 @@ impl PacketCaptureUnit {
         statistics: &mut Shared<NetStatistics>,
         packet_info: PacketInfo,
     ) -> Result<()> {
+        log::info!("Handling packet {:?}", packet_info);
         let pid_opt = {
             packet_matcher
                 .lock()
