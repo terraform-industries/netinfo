@@ -137,7 +137,7 @@ impl CaptureParser {
             }
             EtherTypes::Arp => { /* ignore */ }
             e => {
-                warn!("Warning: Unhandled ethernet packet type: {:?}", e)
+                trace!("Warning: Unhandled ethernet packet type: {:?}", e)
             }
         }
 
