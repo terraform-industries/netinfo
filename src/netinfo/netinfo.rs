@@ -178,6 +178,10 @@ impl PacketCaptureUnit {
             Some(packet_info.transport_type),
             packet_info.datalen,
         );
+        log::info!(
+            "PacketCaptureUnit::handle_packet(): {:?}",
+            statistics.lock().unwrap()
+        );
         Ok(())
     }
 
