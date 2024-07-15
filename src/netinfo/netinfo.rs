@@ -229,7 +229,9 @@ impl PacketCaptureUnit {
 
     /// Get a fresh copy of the network statistics of this capture unit.
     fn get_net_statistics(&self) -> Result<NetStatistics> {
-        Ok(self.statistics.lock().unwrap().clone())
+        let x = self.statistics.lock().unwrap().clone();
+        log::info!("get_net_statistics 1: {:?}", x);
+        Ok(x)
     }
 
     /// Clear network statistics of this capture unit.
@@ -361,9 +363,16 @@ impl Netinfo {
 
     /// Returns the statistics about traffic since last clear.
     pub fn get_net_statistics(&self) -> Result<NetStatistics> {
-        let net_stats: Result<Vec<NetStatistics>> =
-            self.units.iter().map(|u| u.get_net_statistics()).collect();
-        log::info!("get_net_statistics: {:?}", net_stats);
+        let net_stats: Result<Vec<NetStatistics>> = self
+            .units
+            .iter()
+            .map(|u| {
+                let x = u.get_net_statistics();
+                log::info!("get_net_statistics 2: {:?}", x);
+                x
+            })
+            .collect();
+        log::info!("get_net_statistics 3: {:?}", net_stats);
         Ok(NetStatistics::merge(&net_stats?))
     }
 
