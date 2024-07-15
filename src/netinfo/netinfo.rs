@@ -166,21 +166,18 @@ impl PacketCaptureUnit {
         statistics: &mut Shared<NetStatistics>,
         packet_info: PacketInfo,
     ) -> Result<()> {
-        log::info!("Handling packet 1 {:?}", packet_info.datalen);
         let pid_opt = {
             packet_matcher
                 .lock()
                 .unwrap()
                 .find_pid(packet_info.clone())?
         };
-        log::info!("Handling packet 2 {:?}", packet_info.datalen);
         statistics.lock().unwrap().add_bytes(
             pid_opt,
             packet_info.inout_type,
             Some(packet_info.transport_type),
             packet_info.datalen,
         );
-        log::info!("Handling packet 3 {:?}", packet_info.datalen);
         Ok(())
     }
 
@@ -232,6 +229,10 @@ impl PacketCaptureUnit {
 
     /// Get a fresh copy of the network statistics of this capture unit.
     fn get_net_statistics(&self) -> Result<NetStatistics> {
+        log::info!(
+            "PacketCaptureUnit::get_net_statistics(): {:?}",
+            self.statistics.lock().unwrap().clone()
+        );
         Ok(self.statistics.lock().unwrap().clone())
     }
 
