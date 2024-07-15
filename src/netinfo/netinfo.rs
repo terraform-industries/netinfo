@@ -178,10 +178,6 @@ impl PacketCaptureUnit {
             Some(packet_info.transport_type),
             packet_info.datalen,
         );
-        log::info!(
-            "PacketCaptureUnit::handle_packet(): {:?}",
-            statistics.lock().unwrap()
-        );
         Ok(())
     }
 
@@ -233,10 +229,6 @@ impl PacketCaptureUnit {
 
     /// Get a fresh copy of the network statistics of this capture unit.
     fn get_net_statistics(&self) -> Result<NetStatistics> {
-        log::info!(
-            "PacketCaptureUnit::get_net_statistics(): {:?}",
-            self.statistics.lock().unwrap().clone()
-        );
         Ok(self.statistics.lock().unwrap().clone())
     }
 
@@ -371,6 +363,7 @@ impl Netinfo {
     pub fn get_net_statistics(&self) -> Result<NetStatistics> {
         let net_stats: Result<Vec<NetStatistics>> =
             self.units.iter().map(|u| u.get_net_statistics()).collect();
+        log::info!("get_net_statistics: {:?}", net_stats);
         Ok(NetStatistics::merge(&net_stats?))
     }
 
