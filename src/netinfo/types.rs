@@ -1,11 +1,11 @@
-use std::result;
-use std::fmt;
-use std::str::FromStr;
-use std::net::{SocketAddr, Ipv4Addr, Ipv6Addr, IpAddr};
-use pnet::util::MacAddr as PnetMacAddr;
+use netinfo::error::*;
 use pnet::datalink::NetworkInterface as PnetNetworkInterface;
 use pnet::packet::PrimitiveValues;
-use netinfo::error::*;
+use pnet::util::MacAddr as PnetMacAddr;
+use std::fmt;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::result;
+use std::str::FromStr;
 
 /// Udp, Tcp or other packet type on transport layer?
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -15,7 +15,6 @@ pub enum TransportType {
 
     /// Using Udp on transport layer for packet
     Udp,
-
     // others might get added
 }
 
@@ -23,25 +22,41 @@ pub enum TransportType {
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
 pub struct MacAddr(pub u8, pub u8, pub u8, pub u8, pub u8, pub u8);
 impl From<(u8, u8, u8, u8, u8, u8)> for MacAddr {
-    fn from(d: (u8, u8, u8, u8, u8, u8)) -> MacAddr { MacAddr(d.0, d.1, d.2, d.3, d.4, d.5) }
+    fn from(d: (u8, u8, u8, u8, u8, u8)) -> MacAddr {
+        MacAddr(d.0, d.1, d.2, d.3, d.4, d.5)
+    }
 }
 impl From<[u8; 6]> for MacAddr {
-    fn from(d: [u8; 6]) -> MacAddr { MacAddr(d[0], d[1], d[2], d[3], d[4], d[5]) }
+    fn from(d: [u8; 6]) -> MacAddr {
+        MacAddr(d[0], d[1], d[2], d[3], d[4], d[5])
+    }
 }
 impl From<PnetMacAddr> for MacAddr {
-    fn from(d: PnetMacAddr) -> MacAddr { d.to_primitive_values().into() }
+    fn from(d: PnetMacAddr) -> MacAddr {
+        d.to_primitive_values().into()
+    }
 }
 impl From<MacAddr> for PnetMacAddr {
-    fn from(d: MacAddr) -> PnetMacAddr { let MacAddr(a, b, c, d, e, f) = d; PnetMacAddr::new(a, b, c, d, e, f) }
+    fn from(d: MacAddr) -> PnetMacAddr {
+        let MacAddr(a, b, c, d, e, f) = d;
+        PnetMacAddr::new(a, b, c, d, e, f)
+    }
 }
 impl From<MacAddr> for (u8, u8, u8, u8, u8, u8) {
-    fn from(d: MacAddr) -> (u8, u8, u8, u8, u8, u8) { let MacAddr(a, b, c, d, e, f) = d; (a, b, c, d, e, f) }
+    fn from(d: MacAddr) -> (u8, u8, u8, u8, u8, u8) {
+        let MacAddr(a, b, c, d, e, f) = d;
+        (a, b, c, d, e, f)
+    }
 }
 impl From<MacAddr> for [u8; 6] {
-  fn from(f: MacAddr) -> [u8; 6] { [f.0, f.1, f.2, f.3, f.4, f.5] }
+    fn from(f: MacAddr) -> [u8; 6] {
+        [f.0, f.1, f.2, f.3, f.4, f.5]
+    }
 }
 impl fmt::Display for MacAddr {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { PnetMacAddr::from(*self).fmt(f) }
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        PnetMacAddr::from(*self).fmt(f)
+    }
 }
 impl FromStr for MacAddr {
     type Err = Error;
@@ -59,46 +74,58 @@ pub struct NetworkInterface {
     inner: PnetNetworkInterface,
 }
 impl From<PnetNetworkInterface> for NetworkInterface {
-  fn from(f: PnetNetworkInterface) -> NetworkInterface {
-      NetworkInterface { inner: f }
-  }
+    fn from(f: PnetNetworkInterface) -> NetworkInterface {
+        NetworkInterface { inner: f }
+    }
 }
 impl From<NetworkInterface> for PnetNetworkInterface {
-  fn from(f: NetworkInterface) -> PnetNetworkInterface {
-      f.inner
-  }
+    fn from(f: NetworkInterface) -> PnetNetworkInterface {
+        f.inner
+    }
 }
 impl NetworkInterface {
     /// Returns name of network interface (like "enp2s0" or "wlp3s0").
-    pub fn get_name(&self) -> String { self.inner.name.clone() }
+    pub fn get_name(&self) -> String {
+        self.inner.name.clone()
+    }
 
     /// Returns name of network interface (like "enp2s0" or "wlp3s0").
-    pub fn get_name_as_str(&self) -> &str { &self.inner.name }
+    pub fn get_name_as_str(&self) -> &str {
+        &self.inner.name
+    }
 
     /// The interface index (operating system specific)
-    pub fn get_index(&self) -> u32 { self.inner.index }
+    pub fn get_index(&self) -> u32 {
+        self.inner.index
+    }
 
     /// A MAC address for the interface
-    pub fn get_mac(&self) -> Option<MacAddr> { self.inner.mac.map(|m| m.into()) }
+    pub fn get_mac(&self) -> Option<MacAddr> {
+        self.inner.mac.map(|m| m.into())
+    }
 
     /// An IP addresses for the interface
-    pub fn get_ips(&self) -> Vec<IpAddr> { self.inner.ips.iter().map(|x| x.ip()).collect() }
+    pub fn get_ips(&self) -> Vec<IpAddr> {
+        self.inner.ips.iter().map(|x| x.ip()).collect()
+    }
 
     /// Operating system specific flags for the interface
-    pub fn get_flags(&self) -> u32 { self.inner.flags }
+    pub fn get_flags(&self) -> u32 {
+        self.inner.flags
+    }
 }
 
 /// Describes a network packet.
 #[allow(missing_copy_implementations)]
 #[derive(Debug, Clone)]
 pub struct PacketInfo {
-
     /// Source IP
     pub sip: SocketAddr,
 
     /// Destination IP
     pub dip: SocketAddr,
 
+    #[allow(dead_code)]
     /// Number of nanoseconds (currently unused and set to 0)
     pub time: u64,
 
@@ -109,13 +136,26 @@ pub struct PacketInfo {
     pub transport_type: TransportType,
 
     /// Is Some(Incoming) or Some(Outgoing) if inout type can be determined, None if not
-    pub inout_type: Option<InoutType>
+    pub inout_type: Option<InoutType>,
 }
 
 impl PacketInfo {
     /// Constructor for `PacketInfo` type.
-    pub fn new(sip: SocketAddr, dip: SocketAddr, datalen: u64, transport_type: TransportType, inout_type: Option<InoutType>) -> PacketInfo {
-        PacketInfo { sip: sip, dip: dip, time: 0, datalen: datalen, transport_type: transport_type, inout_type: inout_type }
+    pub fn new(
+        sip: SocketAddr,
+        dip: SocketAddr,
+        datalen: u64,
+        transport_type: TransportType,
+        inout_type: Option<InoutType>,
+    ) -> PacketInfo {
+        PacketInfo {
+            sip: sip,
+            dip: dip,
+            time: 0,
+            datalen: datalen,
+            transport_type: transport_type,
+            inout_type: inout_type,
+        }
     }
 }
 
@@ -127,12 +167,11 @@ pub fn reset_socket_addr_ip(s: SocketAddr) -> SocketAddr {
     new
 }
 
-
 /// Set IP and port to zero but leave type untouched.
 pub fn reset_socket_addr(s: SocketAddr) -> SocketAddr {
     match s {
-        SocketAddr::V4(_) => { SocketAddr::new(IpAddr::V4(Ipv4Addr::from([0u8; 4])), 0) }
-        SocketAddr::V6(_) => { SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0u8; 16])), 0) }
+        SocketAddr::V4(_) => SocketAddr::new(IpAddr::V4(Ipv4Addr::from([0u8; 4])), 0),
+        SocketAddr::V6(_) => SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0u8; 16])), 0),
     }
 }
 
@@ -151,7 +190,10 @@ pub struct Connection {
 impl Connection {
     /// Generate new `Connection` from Ipv4 or Ipv6 addressses.
     pub fn new(local: SocketAddr, remote: SocketAddr) -> Connection {
-        Connection { local: local, remote: remote }
+        Connection {
+            local: local,
+            remote: remote,
+        }
     }
 
     /*
@@ -173,7 +215,10 @@ impl Connection {
 
     /// Get connection with port but ip set to zero.
     pub fn get_resetted_ip(&self) -> Connection {
-        Connection::new(reset_socket_addr_ip(self.local), reset_socket_addr_ip(self.remote))
+        Connection::new(
+            reset_socket_addr_ip(self.local),
+            reset_socket_addr_ip(self.remote),
+        )
     }
 
     /// Get connection with port and ip set to zero for remote (but same type).
@@ -193,7 +238,6 @@ impl From<PacketInfo> for Connection {
         Connection::new(p.sip, p.dip)
     }
 }
-
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 /// InoutType can be Incoming or Outgoing (direction of the traffic).

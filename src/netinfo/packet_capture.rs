@@ -1,18 +1,17 @@
-use std;
-use std::net::{SocketAddr, IpAddr};
-use std::collections::HashSet;
-use pnet::datalink::{self, NetworkInterface, Channel, Config};
-use pnet::packet::ethernet::{EtherTypes, EthernetPacket};
-use pnet::packet::ip::{IpNextHeaderProtocols};
-use pnet::packet::ipv4::{Ipv4Packet};
-use pnet::packet::ipv6::{Ipv6Packet};
-use pnet::packet::tcp::{TcpPacket};
-use pnet::packet::udp::{UdpPacket};
-use pnet::packet::{Packet};
-use netinfo::{InoutType, PacketInfo, TransportType, StopRequest};
 use netinfo::error::*;
+use netinfo::{InoutType, PacketInfo, StopRequest, TransportType};
+use pnet::datalink::{self, Channel, Config, NetworkInterface};
+use pnet::packet::ethernet::{EtherTypes, EthernetPacket};
+use pnet::packet::ip::IpNextHeaderProtocols;
+use pnet::packet::ipv4::Ipv4Packet;
+use pnet::packet::ipv6::Ipv6Packet;
+use pnet::packet::tcp::TcpPacket;
+use pnet::packet::udp::UdpPacket;
+use pnet::packet::Packet;
+use std;
+use std::collections::HashSet;
+use std::net::{IpAddr, SocketAddr};
 use std::os::raw::c_int;
-
 
 // taken from https://github.com/rust-lang/libc/blob/454b32511f311b13b235562d98b6c591faa60af3/src/unix/notbsd/mod.rs#L433
 pub const IFF_UP: c_int = 0x1;
@@ -33,14 +32,12 @@ pub const IFF_RUNNING: c_int = 0x40;
 //pub const IFF_AUTOMEDIA: c_int = 0x4000;
 //pub const IFF_DYNAMIC: c_int = 0x8000;
 
-
-
 ///! This module provides `CaptureHandle` which generates `PacketInfo`s from incoming and outgoing traffic.
 ///! What is done to these `PacketInfo`s is decided by a closure which is given to `CaptureHandle::new()`.
 
 /// form a new packet like and use a function to handle it
 ///
-///     handle!(ethernet_packet, Ipv6Packet, handle_ipv6_packet);
+/// handle!(ethernet_packet, Ipv6Packet, handle_ipv6_packet);
 ///
 macro_rules! handle {
     ($_self:ident, $f:ident, $from:ident, $to_ty:ident, $($extra:ident),*) => {{
@@ -55,9 +52,10 @@ macro_rules! handle {
 
 /// Test flags whether device is running
 fn is_running(flags: u32) -> bool {
-  !(flags & IFF_LOOPBACK as u32 != 0) && (flags & IFF_UP as u32 != 0) && (flags & IFF_RUNNING as u32 != 0)
+    !(flags & IFF_LOOPBACK as u32 != 0)
+        && (flags & IFF_UP as u32 != 0)
+        && (flags & IFF_RUNNING as u32 != 0)
 }
-
 
 struct ExtraPacketData {
     length: u64,
@@ -65,94 +63,203 @@ struct ExtraPacketData {
 
 struct CaptureParser {
     /// Function that handles packet infos
-    packet_info_handler: Box<FnMut(PacketInfo) -> Result<StopRequest> + Send>,
+    packet_info_handler: Box<dyn FnMut(PacketInfo) -> Result<StopRequest> + Send>,
 
     /// Local IP addresses accociated with network interface. Organized in a
     /// HashSet so we can determine quickly, whether IpAddr is local IpAddr.
-    local_net_ips: HashSet<IpAddr>
+    local_net_ips: HashSet<IpAddr>,
 }
 
 // `FnMut(X) -> Y` does not implement Debug
 impl std::fmt::Debug for CaptureParser {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         // TODO: wait until `FnMut(X) -> Y` implements Debug, then remove this `impl Debug`
-        write!(f, "CaptureParser {{ packet_info_handler: ???, local_net_ips: {:?} }}", self.local_net_ips)
+        write!(
+            f,
+            "CaptureParser {{ packet_info_handler: ???, local_net_ips: {:?} }}",
+            self.local_net_ips
+        )
     }
 }
 
 impl CaptureParser {
-    fn new(packet_info_handler: Box<FnMut(PacketInfo) -> Result<StopRequest> + Send>, local_net_ips_opt: Vec<IpAddr>) -> CaptureParser {
+    fn new(
+        packet_info_handler: Box<dyn FnMut(PacketInfo) -> Result<StopRequest> + Send>,
+        local_net_ips_opt: Vec<IpAddr>,
+    ) -> CaptureParser {
         let local_net_ips_hashset: HashSet<IpAddr> = local_net_ips_opt.into_iter().collect();
-        CaptureParser { packet_info_handler: packet_info_handler, local_net_ips: local_net_ips_hashset }
+        CaptureParser {
+            packet_info_handler: packet_info_handler,
+            local_net_ips: local_net_ips_hashset,
+        }
     }
 
     fn handle_channel(&mut self, channel: &mut Channel) -> Result<bool> {
-		match channel {
-			&mut Channel::Ethernet(_ /* ref tx */, ref mut rx) => {
-                loop {
-                    let packet = rx.next().chain_err(|| ErrorKind::EthernetReceiveError)?;
-                    let extra_data = ExtraPacketData { length: packet.len() as u64 };
-                    self.handle_ethernet_packet(extra_data, EthernetPacket::new(packet).ok_or(ErrorKind::EthernetReceiveError)?)?;
-				}
-			}
-			_ => {
-                Err(ErrorKind::UnknownNetworkObject.into())
-			}
-		}
+        match channel {
+            &mut Channel::Ethernet(_ /* ref tx */, ref mut rx) => loop {
+                let packet = rx.next().chain_err(|| ErrorKind::EthernetReceiveError)?;
+                let extra_data = ExtraPacketData {
+                    length: packet.len() as u64,
+                };
+                self.handle_ethernet_packet(
+                    extra_data,
+                    EthernetPacket::new(packet).ok_or(ErrorKind::EthernetReceiveError)?,
+                )?;
+            },
+            _ => Err(ErrorKind::UnknownNetworkObject.into()),
+        }
     }
 
-    fn handle_ethernet_packet(&mut self, extra_data: ExtraPacketData, ethernet_packet: EthernetPacket) -> Result<StopRequest> {
+    fn handle_ethernet_packet(
+        &mut self,
+        extra_data: ExtraPacketData,
+        ethernet_packet: EthernetPacket,
+    ) -> Result<StopRequest> {
         let mut stop_request = StopRequest::Continue;
         match ethernet_packet.get_ethertype() {
-            EtherTypes::Ipv4 => { stop_request = handle!(self, handle_ipv4_packet, ethernet_packet, Ipv4Packet, extra_data)? }
-            EtherTypes::Ipv6 => { stop_request = handle!(self, handle_ipv6_packet, ethernet_packet, Ipv6Packet, extra_data)? }
+            EtherTypes::Ipv4 => {
+                stop_request = handle!(
+                    self,
+                    handle_ipv4_packet,
+                    ethernet_packet,
+                    Ipv4Packet,
+                    extra_data
+                )?
+            }
+            EtherTypes::Ipv6 => {
+                stop_request = handle!(
+                    self,
+                    handle_ipv6_packet,
+                    ethernet_packet,
+                    Ipv6Packet,
+                    extra_data
+                )?
+            }
             EtherTypes::Arp => { /* ignore */ }
-            e => { warn!("Warning: Unhandled ethernet packet type: {:?}", e) }
+            e => {
+                warn!("Warning: Unhandled ethernet packet type: {:?}", e)
+            }
         }
 
         Ok(stop_request)
     }
 
-    fn handle_ipv4_packet(&mut self, ipv4_packet: Ipv4Packet, extra_data: ExtraPacketData) -> Result<StopRequest> {
+    fn handle_ipv4_packet(
+        &mut self,
+        ipv4_packet: Ipv4Packet,
+        extra_data: ExtraPacketData,
+    ) -> Result<StopRequest> {
         let mut stop_request = StopRequest::Continue;
         let source = IpAddr::V4(ipv4_packet.get_source());
         let dest = IpAddr::V4(ipv4_packet.get_destination());
 
         match ipv4_packet.get_next_level_protocol() {
-            IpNextHeaderProtocols::Tcp => { stop_request = handle!(self, handle_tcp_packet, ipv4_packet, TcpPacket, source, dest, extra_data)? }
-            IpNextHeaderProtocols::Udp => { stop_request = handle!(self, handle_udp_packet, ipv4_packet, UdpPacket, source, dest, extra_data)? }
-            e => { warn!("Unhandled Ipv4 protocol: {:?}", e); }
+            IpNextHeaderProtocols::Tcp => {
+                stop_request = handle!(
+                    self,
+                    handle_tcp_packet,
+                    ipv4_packet,
+                    TcpPacket,
+                    source,
+                    dest,
+                    extra_data
+                )?
+            }
+            IpNextHeaderProtocols::Udp => {
+                stop_request = handle!(
+                    self,
+                    handle_udp_packet,
+                    ipv4_packet,
+                    UdpPacket,
+                    source,
+                    dest,
+                    extra_data
+                )?
+            }
+            e => {
+                warn!("Unhandled Ipv4 protocol: {:?}", e);
+            }
         }
 
         Ok(stop_request)
     }
 
-    fn handle_ipv6_packet(&mut self, ipv6_packet: Ipv6Packet, extra_data: ExtraPacketData) -> Result<StopRequest> {
+    fn handle_ipv6_packet(
+        &mut self,
+        ipv6_packet: Ipv6Packet,
+        extra_data: ExtraPacketData,
+    ) -> Result<StopRequest> {
         let mut stop_request = StopRequest::Continue;
         let source = IpAddr::V6(ipv6_packet.get_source());
         let dest = IpAddr::V6(ipv6_packet.get_destination());
 
         match ipv6_packet.get_next_header() {
-            IpNextHeaderProtocols::Tcp => { stop_request = handle!(self, handle_tcp_packet, ipv6_packet, TcpPacket, source, dest, extra_data)? }
-            IpNextHeaderProtocols::Udp => { stop_request = handle!(self, handle_udp_packet, ipv6_packet, UdpPacket, source, dest, extra_data)? }
-            e => { warn!("Unhandled Ipv6 protocol: {:?}", e); }
+            IpNextHeaderProtocols::Tcp => {
+                stop_request = handle!(
+                    self,
+                    handle_tcp_packet,
+                    ipv6_packet,
+                    TcpPacket,
+                    source,
+                    dest,
+                    extra_data
+                )?
+            }
+            IpNextHeaderProtocols::Udp => {
+                stop_request = handle!(
+                    self,
+                    handle_udp_packet,
+                    ipv6_packet,
+                    UdpPacket,
+                    source,
+                    dest,
+                    extra_data
+                )?
+            }
+            e => {
+                warn!("Unhandled Ipv6 protocol: {:?}", e);
+            }
         }
 
         Ok(stop_request)
     }
 
-    fn handle_tcp_packet(&mut self, tcp_packet: TcpPacket, source_addr: IpAddr, dest_addr: IpAddr, extra_data: ExtraPacketData) -> Result<StopRequest> {
+    fn handle_tcp_packet(
+        &mut self,
+        tcp_packet: TcpPacket,
+        source_addr: IpAddr,
+        dest_addr: IpAddr,
+        extra_data: ExtraPacketData,
+    ) -> Result<StopRequest> {
         let source = SocketAddr::new(source_addr, tcp_packet.get_source());
         let dest = SocketAddr::new(dest_addr, tcp_packet.get_destination());
         let inout_type = self.get_inout_type(source_addr, dest_addr)?;
-        self.handle_packet_info(PacketInfo::new(source, dest, extra_data.length, TransportType::Tcp, inout_type))
+        self.handle_packet_info(PacketInfo::new(
+            source,
+            dest,
+            extra_data.length,
+            TransportType::Tcp,
+            inout_type,
+        ))
     }
 
-    fn handle_udp_packet(&mut self, udp_packet: UdpPacket, source_addr: IpAddr, dest_addr: IpAddr, extra_data: ExtraPacketData) -> Result<StopRequest> {
+    fn handle_udp_packet(
+        &mut self,
+        udp_packet: UdpPacket,
+        source_addr: IpAddr,
+        dest_addr: IpAddr,
+        extra_data: ExtraPacketData,
+    ) -> Result<StopRequest> {
         let source = SocketAddr::new(source_addr, udp_packet.get_source());
         let dest = SocketAddr::new(dest_addr, udp_packet.get_destination());
         let inout_type = self.get_inout_type(source_addr, dest_addr)?;
-        self.handle_packet_info(PacketInfo::new(source, dest, extra_data.length, TransportType::Udp, inout_type))
+        self.handle_packet_info(PacketInfo::new(
+            source,
+            dest,
+            extra_data.length,
+            TransportType::Udp,
+            inout_type,
+        ))
     }
 
     fn handle_packet_info(&mut self, packet_info: PacketInfo) -> Result<StopRequest> {
@@ -160,19 +267,22 @@ impl CaptureParser {
     }
 
     fn get_inout_type(&self, source_addr: IpAddr, dest_addr: IpAddr) -> Result<Option<InoutType>> {
-        match (self.local_net_ips.contains(&source_addr), self.local_net_ips.contains(&dest_addr)) {
+        match (
+            self.local_net_ips.contains(&source_addr),
+            self.local_net_ips.contains(&dest_addr),
+        ) {
             // local to non-local
-            (true, false) => { Ok(Some(InoutType::Outgoing)) }
+            (true, false) => Ok(Some(InoutType::Outgoing)),
 
             // non-local to local
-            (false, true) => { Ok(Some(InoutType::Incoming)) }
+            (false, true) => Ok(Some(InoutType::Incoming)),
 
             // it can happen that neither address is local.
             // Example: Incoming multicast can go from "remote -> 239.255.255.250".
-            (false, false) => { Ok(None) }
+            (false, false) => Ok(None),
 
             // these packages are supposed to land in loopback... This case should never happen...
-            (true, true) => { Err(ErrorKind::LocalToLocalConnectionError.into()) }
+            (true, true) => Err(ErrorKind::LocalToLocalConnectionError.into()),
         }
     }
 }
@@ -180,29 +290,35 @@ impl CaptureParser {
 /// This structure is used to capture all traffic on a network interface and pass it to a
 /// closure which handles all `PacketInfo`s.
 pub struct CaptureHandle {
-	channel: Channel,
+    channel: Channel,
     capture_parser: CaptureParser,
 }
 
 impl std::fmt::Debug for CaptureHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         // TODO: wait until pnet::datalink::Channel implements Debug, then remove this `impl Debug`
-        write!(f, "CaptureHandle {{ channel: ???, capture_parser: {:?} }}", self.capture_parser)
+        write!(
+            f,
+            "CaptureHandle {{ channel: ???, capture_parser: {:?} }}",
+            self.capture_parser
+        )
     }
 }
-
 
 impl CaptureHandle {
     /// Lists all non-loopback, active network interfaces
     pub fn list_net_interfaces() -> Vec<NetworkInterface> {
-        datalink::interfaces().into_iter().filter(|interface| is_running(interface.flags)).collect()
+        datalink::interfaces()
+            .into_iter()
+            .filter(|interface| is_running(interface.flags))
+            .collect()
     }
 
     /// This function will block while capturing all packets.
     ///
     /// TODO: the pnet crate only allows single threaded pcap; `pcap_setnonblock` is currently (11 Nov 2016) not implemented.
     ///       in the future we might want to use that instead of another thread.
-	pub fn handle_packets(&mut self) -> Result<()> {
+    pub fn handle_packets(&mut self) -> Result<()> {
         self.capture_parser.handle_channel(&mut self.channel)?;
         Ok(())
     }
@@ -211,12 +327,19 @@ impl CaptureHandle {
     /// argument is a closure where all packet infos are dealt with.
     ///
     /// If the closure returns Ok(false), capturing will stop.
-    pub fn new(interface: &NetworkInterface, packet_info_handler: Box<FnMut(PacketInfo) -> Result<StopRequest> + Send>) -> Result<CaptureHandle> {
+    pub fn new(
+        interface: &NetworkInterface,
+        packet_info_handler: Box<dyn FnMut(PacketInfo) -> Result<StopRequest> + Send>,
+    ) -> Result<CaptureHandle> {
         info!("CaptureHandle for interface: {:?}", interface);
 
         Ok(CaptureHandle {
-            channel: datalink::channel(interface, Config::default()).chain_err(|| ErrorKind::ChannelCreationError)?,
-            capture_parser: CaptureParser::new(packet_info_handler, interface.ips.iter().map(|ip| ip.ip()).collect()),
+            channel: datalink::channel(interface, Config::default())
+                .chain_err(|| ErrorKind::ChannelCreationError)?,
+            capture_parser: CaptureParser::new(
+                packet_info_handler,
+                interface.ips.iter().map(|ip| ip.ip()).collect(),
+            ),
         })
     }
 }

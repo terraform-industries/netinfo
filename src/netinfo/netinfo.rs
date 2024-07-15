@@ -1,12 +1,15 @@
-use netinfo::{Pid, PacketInfo, CaptureHandle, PacketMatcher, InoutType, TransportType, NetworkInterface, StopRequest};
+use netinfo::error::*;
+use netinfo::{
+    CaptureHandle, InoutType, NetworkInterface, PacketInfo, PacketMatcher, Pid, StopRequest,
+    TransportType,
+};
 use pnet::datalink::NetworkInterface as PnetNetworkInterface;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::collections::HashMap;
 use std::thread;
-use std::thread::{JoinHandle};
+use std::thread::JoinHandle;
 use std::time::Duration;
-use netinfo::error::*;
 
 #[derive(Clone, Debug)]
 /// Contains detailed information on network usage on per attribute (pid, in/out, tcp/udp).
@@ -18,7 +21,9 @@ pub struct NetStatistics {
 
 impl NetStatistics {
     fn new() -> NetStatistics {
-        NetStatistics { map: HashMap::new() }
+        NetStatistics {
+            map: HashMap::new(),
+        }
     }
 
     fn merge(net_stats: &[NetStatistics]) -> NetStatistics {
@@ -31,16 +36,30 @@ impl NetStatistics {
         res
     }
 
-    fn add_bytes(&mut self, pid: Option<Pid>, c: Option<InoutType>, tt: Option<TransportType>, b: u64) {
+    fn add_bytes(
+        &mut self,
+        pid: Option<Pid>,
+        c: Option<InoutType>,
+        tt: Option<TransportType>,
+        b: u64,
+    ) {
         *self.map.entry((pid, c, tt)).or_insert(0) += b;
     }
 
     /// None means "this value can be arbitrary".
-    fn get_bytes_by_filter(&self, pid: Option<Pid>, c: Option<InoutType>, tt: Option<TransportType>) -> u64 {
-        self.map.iter()
-                .filter(|&(&(kpid, kc, ktt), _)| (pid == None || pid == kpid) && (c == None || c == kc) && (tt == None || tt == ktt))
-                .map(|(_, &b)| b)
-                .fold(0, |b, acc| b + acc)
+    fn get_bytes_by_filter(
+        &self,
+        pid: Option<Pid>,
+        c: Option<InoutType>,
+        tt: Option<TransportType>,
+    ) -> u64 {
+        self.map
+            .iter()
+            .filter(|&(&(kpid, kc, ktt), _)| {
+                (pid == None || pid == kpid) && (c == None || c == kc) && (tt == None || tt == ktt)
+            })
+            .map(|(_, &b)| b)
+            .fold(0, |b, acc| b + acc)
     }
 
     /// Get network usage per pid.
@@ -60,9 +79,12 @@ impl NetStatistics {
 
     /// List all pids which have some data attached.
     pub fn get_all_pids(&self) -> Vec<Pid> {
-        let mut pids: Vec<_> = self.map.keys().map(|&(pid_opt, _, _)| pid_opt)
-                                                .filter_map(|pid_opt| pid_opt)
-                                                .collect();
+        let mut pids: Vec<_> = self
+            .map
+            .keys()
+            .map(|&(pid_opt, _, _)| pid_opt)
+            .filter_map(|pid_opt| pid_opt)
+            .collect();
         pids.sort();
         pids.dedup();
         pids
@@ -70,14 +92,27 @@ impl NetStatistics {
 
     /// None as pid means "traffic that could not be assinged to pid".
     /// None for inout_type or transport_type means "can be anything"
-    pub fn get_bytes_by_attr(&self, pid: Option<Pid>, inout_type: Option<InoutType>, transport_type: Option<TransportType>) -> u64 {
+    pub fn get_bytes_by_attr(
+        &self,
+        pid: Option<Pid>,
+        inout_type: Option<InoutType>,
+        transport_type: Option<TransportType>,
+    ) -> u64 {
         let mut b = 0;
-        for &io_attr in [None, Some(InoutType::Incoming), Some(InoutType::Outgoing)].into_iter() {
-            if inout_type != None && inout_type != io_attr { continue }
-            for &tt_attr in [None, Some(TransportType::Tcp), Some(TransportType::Udp)].into_iter() {
-                if transport_type != None && transport_type != tt_attr { continue }
+        for &io_attr in [None, Some(InoutType::Incoming), Some(InoutType::Outgoing)].iter() {
+            if inout_type != None && inout_type != io_attr {
+                continue;
+            }
+            for &tt_attr in [None, Some(TransportType::Tcp), Some(TransportType::Udp)].iter() {
+                if transport_type != None && transport_type != tt_attr {
+                    continue;
+                }
 
-                b += self.map.get(&(pid, io_attr, tt_attr)).map(|&x| x).unwrap_or(0);
+                b += self
+                    .map
+                    .get(&(pid, io_attr, tt_attr))
+                    .map(|&x| x)
+                    .unwrap_or(0);
             }
         }
 
@@ -91,7 +126,10 @@ impl NetStatistics {
 
     /// Total number of bytes that can be assigned to a pid.
     pub fn get_assigned_bytes(&self) -> u64 {
-        self.map.iter().filter(|&(&(pid_opt, _, _), _)| pid_opt.is_some()).fold(0, |acc, (_, bytes)| acc + bytes)
+        self.map
+            .iter()
+            .filter(|&(&(pid_opt, _, _), _)| pid_opt.is_some())
+            .fold(0, |acc, (_, bytes)| acc + bytes)
     }
 
     /// Total number of bytes.
@@ -106,7 +144,9 @@ impl NetStatistics {
 
 // this makes the multi-threaded types more readable
 type Shared<T> = Arc<Mutex<T>>;
-fn new_shared<T>(t: T) -> Shared<T> { Arc::new(Mutex::new(t)) }
+fn new_shared<T>(t: T) -> Shared<T> {
+    Arc::new(Mutex::new(t))
+}
 
 pub struct PacketCaptureUnit {
     stop_request: Shared<StopRequest>,
@@ -121,22 +161,33 @@ pub struct PacketCaptureUnit {
 impl PacketCaptureUnit {
     /// Handle a PacketInfo: try to find PID for packet with PacketMatcher, then add the length to
     /// the right entry in the network statistics.
-    fn handle_packet(packet_matcher: &mut Shared<PacketMatcher>,
-                     statistics: &mut Shared<NetStatistics>,
-                     packet_info: PacketInfo) -> Result<()> {
+    fn handle_packet(
+        packet_matcher: &mut Shared<PacketMatcher>,
+        statistics: &mut Shared<NetStatistics>,
+        packet_info: PacketInfo,
+    ) -> Result<()> {
         let pid_opt = {
-            packet_matcher.lock().unwrap().find_pid(packet_info.clone())?
+            packet_matcher
+                .lock()
+                .unwrap()
+                .find_pid(packet_info.clone())?
         };
-        statistics.lock().unwrap().add_bytes(pid_opt, packet_info.inout_type, Some(packet_info.transport_type), packet_info.datalen);
+        statistics.lock().unwrap().add_bytes(
+            pid_opt,
+            packet_info.inout_type,
+            Some(packet_info.transport_type),
+            packet_info.datalen,
+        );
         Ok(())
     }
 
     /// Creates a fresh capture closure which will be called every time a packet is captured.
     /// This closure only calls Self::handle_packet().
-    fn get_capture_closure(stop_request: &mut Shared<StopRequest>,
-                        statistics: &mut Shared<NetStatistics>,
-                        packet_matcher: &mut Shared<PacketMatcher>)
-                        -> Box<FnMut(PacketInfo) -> Result<StopRequest> + Send> {
+    fn get_capture_closure(
+        stop_request: &mut Shared<StopRequest>,
+        statistics: &mut Shared<NetStatistics>,
+        packet_matcher: &mut Shared<PacketMatcher>,
+    ) -> Box<dyn FnMut(PacketInfo) -> Result<StopRequest> + Send> {
         let mut packet_matcher = packet_matcher.clone();
         let mut statistics = statistics.clone();
         let stop_request = stop_request.clone();
@@ -152,14 +203,17 @@ impl PacketCaptureUnit {
 
     /// Create a new CaptureUnit for a specific NetworkInterface. Since the packet matcher does not
     /// contain network interface specific information, it is shared among all capture units.
-    fn new(packet_matcher: &mut Shared<PacketMatcher>, i: &PnetNetworkInterface) -> Result<PacketCaptureUnit> {
-
+    fn new(
+        packet_matcher: &mut Shared<PacketMatcher>,
+        i: &PnetNetworkInterface,
+    ) -> Result<PacketCaptureUnit> {
         // copy required fields
         let mut stop_request = new_shared(StopRequest::Continue);
         let mut statistics = new_shared(NetStatistics::new());
 
         // The closure which redirects packet to Self::handle_packet().
-        let boxed_closure = Self::get_capture_closure(&mut stop_request, &mut statistics, packet_matcher);
+        let boxed_closure =
+            Self::get_capture_closure(&mut stop_request, &mut statistics, packet_matcher);
 
         // the capture handle which provides the capturing for one network interface
         let capture_handle = new_shared(CaptureHandle::new(i, boxed_closure)?);
@@ -169,7 +223,7 @@ impl PacketCaptureUnit {
             statistics: statistics,
             stop_request: stop_request,
             thread_handle_opt: None,
-            thread_error: new_shared(None)
+            thread_error: new_shared(None),
         })
     }
 
@@ -192,7 +246,6 @@ impl PacketCaptureUnit {
     }
 
     fn start(&mut self) -> Result<()> {
-
         *self.stop_request.lock().unwrap() = StopRequest::Continue;
 
         let capture_handle = self.capture_handle.clone();
@@ -226,21 +279,25 @@ pub struct Netinfo {
 
     // this vector contains a capture unit for each network inteface
     units: Vec<PacketCaptureUnit>,
-
-
 }
 
 impl Netinfo {
     /// Lists all non-loopback, active (= up and runnig) network interfaces
     pub fn list_net_interfaces() -> Result<Vec<NetworkInterface>> {
-        Ok(CaptureHandle::list_net_interfaces().into_iter().map(|i| NetworkInterface::from(i)).collect())
+        Ok(CaptureHandle::list_net_interfaces()
+            .into_iter()
+            .map(|i| NetworkInterface::from(i))
+            .collect())
     }
 
     /// Constructor for Netinfo. A Netinfo object can handle multple network interfaces at the same time.
     pub fn new(interfaces: &[NetworkInterface]) -> Result<Netinfo> {
         Ok(Netinfo {
             packet_matcher: new_shared(PacketMatcher::new()),
-            network_interfaces: interfaces.iter().map(|i| PnetNetworkInterface::from(i.clone())).collect(),
+            network_interfaces: interfaces
+                .iter()
+                .map(|i| PnetNetworkInterface::from(i.clone()))
+                .collect(),
             units: Vec::new(),
         })
     }
@@ -250,7 +307,9 @@ impl Netinfo {
         // request for all old PacketCaptureUnits to be stopped
         let mut capture_units: Vec<PacketCaptureUnit> = Vec::new();
         let network_interfaces = self.network_interfaces.clone();
-        for i in &network_interfaces { capture_units.push(PacketCaptureUnit::new(&mut self.packet_matcher, i)?); }
+        for i in &network_interfaces {
+            capture_units.push(PacketCaptureUnit::new(&mut self.packet_matcher, i)?);
+        }
 
         Ok(capture_units)
     }
@@ -264,7 +323,10 @@ impl Netinfo {
 
         // recreate units
         self.units = self.get_new_capture_units()?;
-        self.units.iter_mut().map(|u| u.start()).collect::<Result<Vec<()>>>()?;
+        self.units
+            .iter_mut()
+            .map(|u| u.start())
+            .collect::<Result<Vec<()>>>()?;
 
         Ok(())
     }
@@ -275,7 +337,10 @@ impl Netinfo {
     /// packet capture (this is due to a limitation in the packet capture library - as soon as it has non-blocking packet capturing this can be resolved).
     /// Unless you do work that requires detailed thread information, you can safely ignore this implementation detail.
     pub fn stop(&mut self) -> Result<()> {
-        self.units.iter_mut().map(|u| u.stop()).collect::<Result<Vec<()>>>()?;
+        self.units
+            .iter_mut()
+            .map(|u| u.stop())
+            .collect::<Result<Vec<()>>>()?;
         Ok(())
     }
 
@@ -286,19 +351,27 @@ impl Netinfo {
     ///
     /// The `Result` is there for general error handling, the enclosed `Vec<Error>` is the actual return value.
     pub fn pop_thread_errors(&mut self) -> Result<Vec<Error>> {
-        let temp = self.units.iter_mut().map(|u| u.pop_thread_error()).collect::<Result<Vec<Option<Error>>>>()?;
+        let temp = self
+            .units
+            .iter_mut()
+            .map(|u| u.pop_thread_error())
+            .collect::<Result<Vec<Option<Error>>>>()?;
         Ok(temp.into_iter().filter_map(|err_opt| err_opt).collect())
     }
 
     /// Returns the statistics about traffic since last clear.
     pub fn get_net_statistics(&self) -> Result<NetStatistics> {
-        let net_stats: Result<Vec<NetStatistics>> = self.units.iter().map(|u| u.get_net_statistics()).collect();
+        let net_stats: Result<Vec<NetStatistics>> =
+            self.units.iter().map(|u| u.get_net_statistics()).collect();
         Ok(NetStatistics::merge(&net_stats?))
     }
 
     /// Resets the statistics.
     pub fn clear(&mut self) -> Result<()> {
-        self.units.iter_mut().map(|u| u.clear()).collect::<Result<Vec<()>>>()?;
+        self.units
+            .iter_mut()
+            .map(|u| u.clear())
+            .collect::<Result<Vec<()>>>()?;
         Ok(())
     }
 
@@ -311,7 +384,10 @@ impl Netinfo {
     ///
     /// With `None`, you can deactivate time measurements and restore the original behaviour.
     pub fn set_min_refresh_interval(&mut self, t: Option<Duration>) -> Result<()> {
-        self.packet_matcher.lock().unwrap().set_min_refresh_interval(t);
+        self.packet_matcher
+            .lock()
+            .unwrap()
+            .set_min_refresh_interval(t);
         Ok(())
     }
 }
